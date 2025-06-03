@@ -20,5 +20,7 @@
 	<array>
 		<string>com.apple.systempreferences</string>
 	</array>
+	<key>com.apple.developer.family-controls</key>
+	<true/>
 </dict>
 </plist>
