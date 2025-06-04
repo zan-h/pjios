@@ -9,13 +9,11 @@ import SwiftUI
 import SwiftData
 
 struct ContentView: View {
-    @StateObject private var appBlockViewModel: AppBlockViewModel
     @StateObject private var jailkeeperViewModel: JailkeeperViewModel
     @State private var selectedTab = 0
     
     init() {
         print("ContentView: Initializing...")
-        _appBlockViewModel = StateObject(wrappedValue: AppBlockViewModel(screenTimeService: ScreenTimeService()))
         _jailkeeperViewModel = StateObject(wrappedValue: JailkeeperViewModel(llmService: LLMService()))
         print("ContentView: Initialization complete")
     }
@@ -31,20 +29,11 @@ struct ContentView: View {
                     print("Schemas tab appeared")
                 }
             
-            AppListView(viewModel: appBlockViewModel)
-                .tabItem {
-                    Label("Apps", systemImage: "app.badge")
-                }
-                .tag(1)
-                .onAppear {
-                    print("Apps tab appeared")
-                }
-            
             JailkeeperChatView(viewModel: jailkeeperViewModel)
                 .tabItem {
                     Label("Jailkeeper", systemImage: "person.fill")
                 }
-                .tag(2)
+                .tag(1)
                 .onAppear {
                     print("Jailkeeper tab appeared")
                 }
@@ -53,7 +42,7 @@ struct ContentView: View {
                 .tabItem {
                     Label("Settings", systemImage: "gear")
                 }
-                .tag(3)
+                .tag(2)
                 .onAppear {
                     print("Settings tab appeared")
                 }

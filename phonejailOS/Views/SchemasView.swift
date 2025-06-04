@@ -8,9 +8,15 @@
 import SwiftUI
 
 struct SchemasView: View {
-    @StateObject private var viewModel = SchemaViewModel(screenTimeService: ScreenTimeService())
+    @EnvironmentObject private var screenTimeService: ScreenTimeService
+    @StateObject private var viewModel: SchemaViewModel
     @State private var showingSchemaCreation = false
     @State private var searchText = ""
+    
+    init() {
+        // Initialize with a temporary ScreenTimeService that will be replaced in onAppear
+        _viewModel = StateObject(wrappedValue: SchemaViewModel(screenTimeService: ScreenTimeService()))
+    }
     
     var body: some View {
         NavigationStack {
@@ -54,6 +60,10 @@ struct SchemasView: View {
                 Button("OK") { }
             } message: {
                 Text(viewModel.errorMessage ?? "An unknown error occurred")
+            }
+            .onAppear {
+                // Update the viewModel to use the shared screenTimeService
+                viewModel.updateScreenTimeService(screenTimeService)
             }
         }
     }
@@ -495,6 +505,19 @@ struct SchemaCreationView: View {
                 .foregroundColor(.secondary)
                 .padding(.vertical)
             
+            // Show configured conditions
+            if !viewModel.blockingConditions.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Configured Conditions")
+                        .font(.headline)
+                    
+                    ForEach(Array(viewModel.blockingConditions.enumerated()), id: \.element.id) { index, condition in
+                        configuredConditionRow(condition: condition, index: index)
+                    }
+                }
+                .padding(.bottom)
+            }
+            
             // Condition options
             VStack(spacing: 12) {
                 conditionCard(
@@ -502,8 +525,7 @@ struct SchemaCreationView: View {
                     description: "When the clock is at specific times in the day.",
                     icon: "calendar",
                     action: {
-                        let condition = BlockingCondition(type: .schedule)
-                        viewModel.addBlockingCondition(condition)
+                        viewModel.showScheduleConfiguration = true
                     }
                 )
                 
@@ -512,13 +534,116 @@ struct SchemaCreationView: View {
                     description: "When the content has been used for more than a specified combined amount of time in the day.",
                     icon: "clock",
                     action: {
-                        let condition = BlockingCondition(type: .dailyUsageLimit)
-                        viewModel.addBlockingCondition(condition)
+                        viewModel.showUsageLimitConfiguration = true
                     }
                 )
             }
         }
         .padding()
+        .sheet(isPresented: $viewModel.showScheduleConfiguration) {
+            ScheduleConfigurationView(viewModel: viewModel)
+        }
+        .sheet(isPresented: $viewModel.showUsageLimitConfiguration) {
+            UsageLimitConfigurationView(viewModel: viewModel)
+        }
+    }
+    
+    private func configuredConditionRow(condition: BlockingCondition, index: Int) -> some View {
+        HStack {
+            Image(systemName: condition.type.iconName)
+                .foregroundColor(.blue)
+                .frame(width: 24)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(condition.type.displayName)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                
+                Text(conditionSummary(condition))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            Spacer()
+            
+            Button(action: {
+                viewModel.removeBlockingCondition(at: index)
+            }) {
+                Image(systemName: "trash")
+                    .foregroundColor(.red)
+                    .font(.caption)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color(.systemGray6))
+        .cornerRadius(8)
+    }
+    
+    private func conditionSummary(_ condition: BlockingCondition) -> String {
+        switch condition.type {
+        case .schedule:
+            if let start = condition.scheduleStart, let end = condition.scheduleEnd {
+                let startTime = formatTime(start)
+                let endTime = formatTime(end)
+                let days = condition.activeDays.isEmpty ? "Daily" : formatDays(condition.activeDays)
+                return "\(startTime) - \(endTime), \(days)"
+            }
+            return "Not configured"
+        case .dailyUsageLimit:
+            if let limit = condition.usageLimit {
+                return formatDuration(limit)
+            }
+            return "Not configured"
+        case .custom:
+            return condition.customDescription ?? "Custom condition"
+        }
+    }
+    
+    private func formatTime(_ components: DateComponents) -> String {
+        let hour = components.hour ?? 0
+        let minute = components.minute ?? 0
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        let date = Calendar.current.date(from: DateComponents(hour: hour, minute: minute)) ?? Date()
+        return formatter.string(from: date)
+    }
+    
+    private func formatDays(_ days: Set<Weekday>) -> String {
+        if days.count == 7 {
+            return "Daily"
+        } else if days.count == 5 && !days.contains(.saturday) && !days.contains(.sunday) {
+            return "Weekdays"
+        } else if days.count == 2 && days.contains(.saturday) && days.contains(.sunday) {
+            return "Weekends"
+        } else {
+            return days.sorted(by: { weekdayOrder($0) < weekdayOrder($1) })
+                      .map { $0.shortName }
+                      .joined(separator: ", ")
+        }
+    }
+    
+    private func weekdayOrder(_ weekday: Weekday) -> Int {
+        switch weekday {
+        case .sunday: return 0
+        case .monday: return 1
+        case .tuesday: return 2
+        case .wednesday: return 3
+        case .thursday: return 4
+        case .friday: return 5
+        case .saturday: return 6
+        }
+    }
+    
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        let hours = Int(seconds) / 3600
+        let minutes = (Int(seconds) % 3600) / 60
+        
+        if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        } else {
+            return "\(minutes)m"
+        }
     }
     
     private func conditionCard(title: String, description: String, icon: String, action: @escaping () -> Void) -> some View {
@@ -573,6 +698,188 @@ struct SchemaCreationView: View {
             }
         }
         .padding()
+    }
+}
+
+struct ScheduleConfigurationView: View {
+    @ObservedObject var viewModel: SchemaViewModel
+    @Environment(\.dismiss) private var dismiss
+    
+    @State private var startTime = Date()
+    @State private var endTime = Date()
+    @State private var selectedDays: Set<Weekday> = Set(Weekday.allCases)
+    @State private var repeats = true
+    
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Time Range") {
+                    DatePicker("Start Time", selection: $startTime, displayedComponents: .hourAndMinute)
+                    DatePicker("End Time", selection: $endTime, displayedComponents: .hourAndMinute)
+                }
+                
+                Section("Repeat") {
+                    Toggle("Repeat Daily", isOn: $repeats)
+                    
+                    if repeats {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Active Days")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 8) {
+                                ForEach(Weekday.allCases, id: \.self) { day in
+                                    dayToggle(day)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 8)
+                    }
+                }
+                
+                Section {
+                    Text("The selected content will be blocked during the specified time range.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .navigationTitle("Schedule Condition")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+                
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Add") {
+                        addScheduleCondition()
+                        dismiss()
+                    }
+                    .disabled(!isValidSchedule)
+                }
+            }
+        }
+    }
+    
+    private func dayToggle(_ day: Weekday) -> some View {
+        Button(action: {
+            if selectedDays.contains(day) {
+                selectedDays.remove(day)
+            } else {
+                selectedDays.insert(day)
+            }
+        }) {
+            Text(day.shortName)
+                .font(.caption)
+                .fontWeight(.medium)
+                .foregroundColor(selectedDays.contains(day) ? .white : .blue)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(selectedDays.contains(day) ? Color.blue : Color.blue.opacity(0.1))
+                .cornerRadius(8)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+    
+    private var isValidSchedule: Bool {
+        return !selectedDays.isEmpty && startTime != endTime
+    }
+    
+    private func addScheduleCondition() {
+        let calendar = Calendar.current
+        let startComponents = calendar.dateComponents([.hour, .minute], from: startTime)
+        let endComponents = calendar.dateComponents([.hour, .minute], from: endTime)
+        
+        var condition = BlockingCondition(type: .schedule)
+        condition.scheduleStart = startComponents
+        condition.scheduleEnd = endComponents
+        condition.repeats = repeats
+        condition.activeDays = selectedDays
+        
+        viewModel.addBlockingCondition(condition)
+    }
+}
+
+struct UsageLimitConfigurationView: View {
+    @ObservedObject var viewModel: SchemaViewModel
+    @Environment(\.dismiss) private var dismiss
+    
+    @State private var hours: Int = 0
+    @State private var minutes: Int = 30
+    
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Usage Limit") {
+                    HStack {
+                        Text("Time Limit")
+                        Spacer()
+                        
+                        Picker("Hours", selection: $hours) {
+                            ForEach(0...23, id: \.self) { hour in
+                                Text("\(hour)h").tag(hour)
+                            }
+                        }
+                        .pickerStyle(WheelPickerStyle())
+                        .frame(width: 80)
+                        
+                        Picker("Minutes", selection: $minutes) {
+                            ForEach(Array(stride(from: 0, through: 59, by: 5)), id: \.self) { minute in
+                                Text("\(minute)m").tag(minute)
+                            }
+                        }
+                        .pickerStyle(WheelPickerStyle())
+                        .frame(width: 80)
+                    }
+                }
+                
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("How it works:")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        
+                        Text("• The timer tracks total usage across all selected apps and websites")
+                        Text("• Once the limit is reached, content will be blocked for the rest of the day")
+                        Text("• The timer resets at midnight each day")
+                    }
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                }
+            }
+            .navigationTitle("Usage Limit")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+                
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Add") {
+                        addUsageLimitCondition()
+                        dismiss()
+                    }
+                    .disabled(!isValidUsageLimit)
+                }
+            }
+        }
+    }
+    
+    private var isValidUsageLimit: Bool {
+        return hours > 0 || minutes > 0
+    }
+    
+    private func addUsageLimitCondition() {
+        let totalSeconds = TimeInterval(hours * 3600 + minutes * 60)
+        
+        var condition = BlockingCondition(type: .dailyUsageLimit)
+        condition.usageLimit = totalSeconds
+        
+        viewModel.addBlockingCondition(condition)
     }
 }
 

@@ -22,18 +22,35 @@ class SchemaViewModel: ObservableObject {
     @Published var showingFamilyActivityPicker = false
     private let familyControlsStorage = FamilyControlsStorage.shared
     
+    // Condition Configuration
+    @Published var showScheduleConfiguration = false
+    @Published var showUsageLimitConfiguration = false
+    
     // Error handling
     @Published var errorMessage: String?
     @Published var showingError = false
     
-    private let screenTimeService: ScreenTimeService
+    private var screenTimeService: ScreenTimeService
     private var cancellables = Set<AnyCancellable>()
     private let logger = Logger(subsystem: "mizzron.phonejailOS", category: "SchemaViewModel")
     
     init(screenTimeService: ScreenTimeService) {
         self.screenTimeService = screenTimeService
         loadSchemas()
-        
+        setupScreenTimeServiceObservation()
+    }
+    
+    // MARK: - ScreenTime Service Management
+    
+    func updateScreenTimeService(_ newService: ScreenTimeService) {
+        self.screenTimeService = newService
+        // Clear existing subscriptions
+        cancellables.removeAll()
+        // Setup new observations
+        setupScreenTimeServiceObservation()
+    }
+    
+    private func setupScreenTimeServiceObservation() {
         // Observe ScreenTime service changes
         self.screenTimeService.$authorizationStatus
             .sink { [weak self] status in
