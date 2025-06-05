@@ -7,7 +7,12 @@ struct JailkeeperChatView: View {
     
     var body: some View {
         NavigationView {
-            VStack {
+            VStack(spacing: 0) {
+                // Access control mode banner
+                if viewModel.isInAccessControlMode {
+                    accessControlBanner
+                }
+                
                 // Chat messages
                 ScrollView {
                     LazyVStack(spacing: 12) {
@@ -22,7 +27,7 @@ struct JailkeeperChatView: View {
                 VStack(spacing: 0) {
                     Divider()
                     HStack {
-                        TextField("Type your message...", text: $messageText)
+                        TextField(viewModel.isInAccessControlMode ? "Convince me to grant access..." : "Type your message...", text: $messageText)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
                             .disabled(viewModel.isLoading)
                         
@@ -58,6 +63,27 @@ struct JailkeeperChatView: View {
         }
     }
     
+    private var accessControlBanner: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Image(systemName: "lock.shield")
+                    .foregroundColor(.orange)
+                Text("Access Control Mode")
+                    .font(.headline)
+                    .foregroundColor(.orange)
+                Spacer()
+            }
+            
+            Text("You need to convince the jailkeeper to grant you access to modify your schemas.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.leading)
+        }
+        .padding()
+        .background(Color.orange.opacity(0.1))
+        .border(Color.orange.opacity(0.3), width: 1)
+    }
+    
     private func sendMessage() {
         guard !messageText.isEmpty else { return }
         let message = messageText
@@ -76,23 +102,55 @@ struct MessageBubble: View {
         HStack {
             if message.sender == .user {
                 Spacer()
+            } else if message.sender == .system {
+                // System messages are centered
+            } else {
+                // Jailkeeper messages align left
             }
             
             VStack(alignment: message.sender == .user ? .trailing : .leading) {
                 Text(message.content)
                     .padding()
-                    .background(message.sender == .user ? Color.blue : Color.gray.opacity(0.2))
-                    .foregroundColor(message.sender == .user ? .white : .primary)
+                    .background(backgroundColor)
+                    .foregroundColor(textColor)
                     .cornerRadius(16)
                 
-                Text(message.timestamp, style: .time)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+                if message.sender != .system {
+                    Text(message.timestamp, style: .time)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
             }
             
             if message.sender == .jailkeeper {
                 Spacer()
+            } else if message.sender == .system {
+                // System messages are centered
+            } else {
+                // User messages align right
             }
+        }
+    }
+    
+    private var backgroundColor: Color {
+        switch message.sender {
+        case .user:
+            return .blue
+        case .jailkeeper:
+            return .gray.opacity(0.2)
+        case .system:
+            return .green.opacity(0.2)
+        }
+    }
+    
+    private var textColor: Color {
+        switch message.sender {
+        case .user:
+            return .white
+        case .jailkeeper:
+            return .primary
+        case .system:
+            return .green
         }
     }
 }

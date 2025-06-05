@@ -33,6 +33,7 @@ enum Personality: String, CaseIterable, Identifiable {
 enum MessageSender: String, Codable, CaseIterable {
     case user
     case jailkeeper
+    case system
 }
 
 struct AppContext {

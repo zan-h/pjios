@@ -195,7 +195,7 @@ enum BlockingConditionType: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-struct BlockingCondition: Identifiable, Codable {
+struct BlockingCondition: Identifiable, Codable, Equatable {
     let id = UUID()
     let type: BlockingConditionType
     
@@ -214,6 +214,19 @@ struct BlockingCondition: Identifiable, Codable {
     
     init(type: BlockingConditionType) {
         self.type = type
+    }
+    
+    // MARK: - Equatable Conformance
+    static func == (lhs: BlockingCondition, rhs: BlockingCondition) -> Bool {
+        return lhs.id == rhs.id &&
+               lhs.type == rhs.type &&
+               lhs.scheduleStart == rhs.scheduleStart &&
+               lhs.scheduleEnd == rhs.scheduleEnd &&
+               lhs.repeats == rhs.repeats &&
+               lhs.activeDays == rhs.activeDays &&
+               lhs.usageLimit == rhs.usageLimit &&
+               lhs.customTitle == rhs.customTitle &&
+               lhs.customDescription == rhs.customDescription
     }
 }
 
@@ -289,7 +302,7 @@ enum SchemaStatus: String, CaseIterable, Identifiable, Codable {
 }
 
 // MARK: - Main Schema Model
-struct Schema: Identifiable, Codable {
+struct Schema: Identifiable, Codable, Equatable {
     let id = UUID()
     var name: String
     var type: SchemaType
@@ -323,6 +336,21 @@ struct Schema: Identifiable, Codable {
     ) {
         self.name = name
         self.type = type
+    }
+    
+    // MARK: - Equatable Conformance
+    static func == (lhs: Schema, rhs: Schema) -> Bool {
+        return lhs.id == rhs.id &&
+               lhs.name == rhs.name &&
+               lhs.type == rhs.type &&
+               lhs.status == rhs.status &&
+               lhs.selectedApps == rhs.selectedApps &&
+               lhs.selectedWebsites == rhs.selectedWebsites &&
+               lhs.selectedCategories == rhs.selectedCategories &&
+               lhs.blockingConditions == rhs.blockingConditions &&
+               lhs.isStrictModeEnabled == rhs.isStrictModeEnabled &&
+               lhs.isPaused == rhs.isPaused &&
+               lhs.pauseEndTime == rhs.pauseEndTime
     }
     
     // Computed properties

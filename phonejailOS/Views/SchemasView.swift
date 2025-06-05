@@ -9,6 +9,7 @@ import SwiftUI
 
 struct SchemasView: View {
     @EnvironmentObject private var screenTimeService: ScreenTimeService
+    @EnvironmentObject private var accessControlService: AccessControlService
     @StateObject private var viewModel: SchemaViewModel
     @State private var showingSchemaCreation = false
     @State private var searchText = ""
@@ -20,24 +21,31 @@ struct SchemasView: View {
     
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 0) {
-                    // Search bar
-                    if !searchText.isEmpty || !viewModel.schemas.isEmpty {
-                        searchBar
-                            .padding(.horizontal)
-                            .padding(.bottom)
-                    }
-                    
-                    // User's schemas section
-                    if !viewModel.schemas.isEmpty {
-                        userSchemasSection
-                    }
-                    
-                    // Starter schemas section
-                    starterSchemasSection
+            VStack(spacing: 0) {
+                // Access status banner
+                if accessControlService.temporaryAccessGranted {
+                    accessStatusBanner
                 }
-                .padding(.vertical)
+                
+                ScrollView {
+                    VStack(spacing: 0) {
+                        // Search bar
+                        if !searchText.isEmpty || !viewModel.schemas.isEmpty {
+                            searchBar
+                                .padding(.horizontal)
+                                .padding(.bottom)
+                        }
+                        
+                        // User's schemas section
+                        if !viewModel.schemas.isEmpty {
+                            userSchemasSection
+                        }
+                        
+                        // Starter schemas section
+                        starterSchemasSection
+                    }
+                    .padding(.vertical)
+                }
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("My Schemas")
@@ -64,8 +72,48 @@ struct SchemasView: View {
             .onAppear {
                 // Update the viewModel to use the shared screenTimeService
                 viewModel.updateScreenTimeService(screenTimeService)
+                // Update access control status
+                updateAccessControlStatus()
+            }
+            .onChange(of: viewModel.schemas) { _ in
+                // Monitor schema changes to update access control
+                updateAccessControlStatus()
             }
         }
+    }
+    
+    private var accessStatusBanner: some View {
+        HStack {
+            Image(systemName: "clock.fill")
+                .foregroundColor(.orange)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Temporary Access Granted")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(.orange)
+                
+                Text("Time remaining: \(accessControlService.accessTimeRemainingFormatted)")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            
+            Spacer()
+            
+            Button("Extend") {
+                accessControlService.extendAccess(additionalTime: 5 * 60) // 5 minutes
+            }
+            .font(.caption)
+            .foregroundColor(.blue)
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(Color.orange.opacity(0.1))
+    }
+    
+    private func updateAccessControlStatus() {
+        // Access control status is now automatically updated by the AccessControlService
+        // No manual update needed since it monitors schema changes directly
     }
     
     private var searchBar: some View {
@@ -101,7 +149,9 @@ struct SchemasView: View {
                             }
                         },
                         onDelete: {
-                            viewModel.deleteSchema(schema)
+                            Task {
+                                await viewModel.deleteSchema(schema)
+                            }
                         }
                     )
                 }

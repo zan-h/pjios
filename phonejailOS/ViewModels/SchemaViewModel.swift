@@ -38,6 +38,9 @@ class SchemaViewModel: ObservableObject {
         self.screenTimeService = screenTimeService
         loadSchemas()
         setupScreenTimeServiceObservation()
+        
+        // Sync active schemas with ScreenTimeService
+        screenTimeService.syncActiveSchemas(from: schemas)
     }
     
     // MARK: - ScreenTime Service Management
@@ -48,6 +51,9 @@ class SchemaViewModel: ObservableObject {
         cancellables.removeAll()
         // Setup new observations
         setupScreenTimeServiceObservation()
+        
+        // Sync active schemas with the new service
+        newService.syncActiveSchemas(from: schemas)
     }
     
     private func setupScreenTimeServiceObservation() {
@@ -211,19 +217,54 @@ class SchemaViewModel: ObservableObject {
         }
     }
     
-    func deleteSchema(_ schema: Schema) {
-        // Deactivate schema if it's active
+    func deleteSchema(_ schema: Schema) async {
+        // Deactivate schema if it's active - MUST wait for completion
         if schema.status == .active {
-            Task {
-                await deactivateSchema(schema)
-            }
+            await deactivateSchema(schema)
         }
         
-        // Remove Family Controls selection
-        familyControlsStorage.removeSelection(for: schema.id)
+        // Force clear all settings for this schema (backup cleanup)
+        await screenTimeService.forceClearSchemaSettings(for: schema.id)
         
+        // Remove from schemas array
         schemas.removeAll { $0.id == schema.id }
         saveSchemas()
+        
+        logger.info("Schema deleted: \(schema.name)")
+    }
+    
+    // MARK: - Strict Mode Management
+    
+    func enableStrictMode(for schema: Schema) {
+        guard let index = schemas.firstIndex(where: { $0.id == schema.id }) else { return }
+        
+        schemas[index].isStrictModeEnabled = true
+        if schemas[index].status == .active {
+            schemas[index].status = .strictMode
+        }
+        saveSchemas()
+        
+        logger.info("Strict mode enabled for schema: \(schema.name)")
+    }
+    
+    func disableStrictMode(for schema: Schema) {
+        guard let index = schemas.firstIndex(where: { $0.id == schema.id }) else { return }
+        
+        schemas[index].isStrictModeEnabled = false
+        if schemas[index].status == .strictMode {
+            schemas[index].status = .active
+        }
+        saveSchemas()
+        
+        logger.info("Strict mode disabled for schema: \(schema.name)")
+    }
+    
+    func toggleStrictMode(for schema: Schema) {
+        if schema.isStrictModeEnabled {
+            disableStrictMode(for: schema)
+        } else {
+            enableStrictMode(for: schema)
+        }
     }
     
     // MARK: - Blocking Conditions
@@ -334,5 +375,15 @@ class SchemaViewModel: ObservableObject {
         default:
             return false
         }
+    }
+    
+    /// Get the count of active schemas from ScreenTimeService
+    var screenTimeActiveCount: Int {
+        return screenTimeService.activeSchemas.count
+    }
+    
+    /// Trigger debug logging for blocking state
+    func debugBlockingState() {
+        screenTimeService.debugBlockingState()
     }
 } 

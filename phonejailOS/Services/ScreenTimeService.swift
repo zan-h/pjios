@@ -40,6 +40,7 @@ class ScreenTimeService: ObservableObject {
     private let store = ManagedSettingsStore()
     private let center = DeviceActivityCenter()
     private let logger = Logger(subsystem: "mizzron.phonejailOS", category: "ScreenTimeService")
+    private let familyControlsStorage = FamilyControlsStorage.shared
     
     // Cache for application tokens
     private var applicationTokens: [String: ApplicationToken] = [:]
@@ -210,6 +211,7 @@ class ScreenTimeService: ObservableObject {
         }
         
         let schemaId = schema.id
+        logger.info("Activating schema (legacy method): \(schema.name) with ID: \(schemaId)")
         
         // Create managed settings store for this schema
         let schemaStore = ManagedSettingsStore(named: .init(schemaId.uuidString))
@@ -243,11 +245,22 @@ class ScreenTimeService: ObservableObject {
         schemaStores[schemaId] = schemaStore
         activeSchemas.insert(schemaId)
         
-        logger.info("Schema activated: \(schema.name)")
+        // Update blocked apps tracking
+        updateBlockedAppsSet()
+        
+        logger.info("Schema activated (legacy): \(schema.name). Active schemas: \(self.activeSchemas.count)")
     }
     
     func deactivateSchema(_ schema: Schema) async throws {
         let schemaId = schema.id
+        
+        // Stop monitoring for this schema first
+        stopSchemaMonitoring(schema)
+        
+        // Check if this schema uses Family Controls
+        if familyControlsStorage.hasSelection(for: schemaId) {
+            try await deactivateFamilyControlsBlocking(for: schemaId)
+        }
         
         // Clear managed settings for this schema
         if let schemaStore = schemaStores[schemaId] {
@@ -258,10 +271,26 @@ class ScreenTimeService: ObservableObject {
         // Remove from active schemas
         activeSchemas.remove(schemaId)
         
-        // Cancel any scheduled restrictions for this schema
-        center.stopMonitoring([DeviceActivityName(schemaId.uuidString)])
+        // Update blocked apps set to reflect the change
+        updateBlockedAppsSet()
         
         logger.info("Schema deactivated: \(schema.name)")
+    }
+    
+    /// Deactivate Family Controls blocking for a specific schema
+    private func deactivateFamilyControlsBlocking(for schemaId: UUID) async throws {
+        guard let schemaStore = schemaStores[schemaId] else {
+            logger.warning("No schema store found for schema: \(schemaId)")
+            return
+        }
+        
+        // Clear the shield settings
+        schemaStore.shield.applications = nil
+        schemaStore.shield.webDomains = nil
+        schemaStore.shield.applicationCategories = nil
+        schemaStore.shield.webDomainCategories = nil
+        
+        logger.info("Cleared Family Controls blocking for schema: \(schemaId)")
     }
     
     func isAppBlocked(_ bundleIdentifier: String) -> Bool {
@@ -365,13 +394,23 @@ class ScreenTimeService: ObservableObject {
     }
     
     private func updateBlockedAppsSet() {
-        let allBlockedApps: Set<String> = []
+        var allBlockedApps: Set<String> = []
         
         // Collect all apps blocked by active schemas
-        // In practice, you'd track which apps belong to each schema
-        // For now, this is a simplified implementation
+        for schemaId in self.activeSchemas {
+            if let selection = self.familyControlsStorage.getSelection(for: schemaId) {
+                // Note: We can't get bundle identifiers from ApplicationTokens directly
+                // This is a limitation of Family Controls API for privacy reasons
+                // For UI purposes, we'll track that apps are blocked but can't identify specific ones
+                if !selection.applicationTokens.isEmpty {
+                    // Add a placeholder to indicate apps are blocked by this schema
+                    allBlockedApps.insert("family_controls_apps_\(schemaId.uuidString)")
+                }
+            }
+        }
         
-        blockedApps = allBlockedApps
+        self.blockedApps = allBlockedApps
+        logger.info("Updated blocked apps set: \(self.blockedApps.count) entries for \(self.activeSchemas.count) active schemas")
     }
     
     // MARK: - Improved Legacy Methods (for backward compatibility)
@@ -498,6 +537,8 @@ class ScreenTimeService: ObservableObject {
             throw ScreenTimeError.notAuthorized
         }
         
+        logger.info("Applying blocking for schema \(schemaId) with \(selection.applicationTokens.count) apps and \(selection.webDomainTokens.count) websites")
+        
         // Get or create schema store
         let schemaStore = ManagedSettingsStore(named: .init(schemaId.uuidString))
         
@@ -513,11 +554,92 @@ class ScreenTimeService: ObservableObject {
             logger.info("Applied blocking to \(selection.webDomainTokens.count) selected websites")
         }
         
+        // Apply category blocking if any - Fix: Use correct property assignment
+        if !selection.categoryTokens.isEmpty {
+            schemaStore.shield.applicationCategories = ShieldSettings.ActivityCategoryPolicy.specific(selection.categoryTokens)
+            logger.info("Applied blocking to \(selection.categoryTokens.count) selected categories")
+        }
+        
         // Store for later reference
         schemaStores[schemaId] = schemaStore
-        activeSchemas.insert(schemaId)
+        self.activeSchemas.insert(schemaId)
         
-        logger.info("Successfully applied Family Controls blocking for schema")
+        // Update blocked apps tracking
+        updateBlockedAppsSet()
+        
+        logger.info("Successfully applied Family Controls blocking for schema \(schemaId). Active schemas: \(self.activeSchemas.count)")
+    }
+    
+    /// Force clear all settings for a schema (used when deleting schemas)
+    func forceClearSchemaSettings(for schemaId: UUID) async {
+        // Clear from Family Controls storage
+        familyControlsStorage.removeSelection(for: schemaId)
+        
+        // Clear managed settings store if it exists
+        if let schemaStore = schemaStores[schemaId] {
+            schemaStore.clearAllSettings()
+            schemaStores.removeValue(forKey: schemaId)
+        } else {
+            // Create a new store with the schema ID and clear it (in case it exists but we lost reference)
+            let schemaStore = ManagedSettingsStore(named: .init(schemaId.uuidString))
+            schemaStore.clearAllSettings()
+        }
+        
+        // Remove from active schemas
+        activeSchemas.remove(schemaId)
+        
+        // Stop any monitoring activities
+        let scheduleActivity = DeviceActivityName("Schema_\(schemaId.uuidString)_Schedule")
+        let usageActivity = DeviceActivityName("Schema_\(schemaId.uuidString)_Usage")
+        center.stopMonitoring([scheduleActivity, usageActivity])
+        
+        // Update blocked apps set
+        updateBlockedAppsSet()
+        
+        logger.info("Force cleared all settings for schema: \(schemaId)")
+    }
+    
+    /// Sync active schemas from SchemaViewModel on startup
+    func syncActiveSchemas(from schemas: [Schema]) {
+        logger.info("Syncing active schemas from SchemaViewModel...")
+        
+        // Clear current active schemas
+        self.activeSchemas.removeAll()
+        
+        // Add schemas that are marked as active in the UI
+        for schema in schemas {
+            if schema.status == .active || schema.status == .strictMode {
+                self.activeSchemas.insert(schema.id)
+                logger.info("Synced active schema: \(schema.name) (\(schema.id))")
+            }
+        }
+        
+        // Update blocked apps tracking
+        updateBlockedAppsSet()
+        
+        logger.info("Sync complete. Active schemas: \(self.activeSchemas.count)")
+    }
+    
+    /// Debug method to check current blocking state
+    func debugBlockingState() {
+        logger.info("=== BLOCKING STATE DEBUG ===")
+        logger.info("Authorization Status: \(String(describing: self.authorizationStatus))")
+        logger.info("Active Schemas Count: \(self.activeSchemas.count)")
+        logger.info("Active Schema IDs: \(self.activeSchemas.map { $0.uuidString })")
+        logger.info("Blocked Apps Count: \(self.blockedApps.count)")
+        logger.info("Blocked Apps: \(Array(self.blockedApps))")
+        logger.info("Schema Stores Count: \(self.schemaStores.count)")
+        
+        for (schemaId, _) in self.schemaStores {
+            logger.info("Schema Store \(schemaId):")
+            logger.info("  - Has Family Controls selection: \(self.familyControlsStorage.hasSelection(for: schemaId))")
+            if let selection = self.familyControlsStorage.getSelection(for: schemaId) {
+                logger.info("  - App tokens: \(selection.applicationTokens.count)")
+                logger.info("  - Website tokens: \(selection.webDomainTokens.count)")
+                logger.info("  - Category tokens: \(selection.categoryTokens.count)")
+            }
+        }
+        logger.info("=== END DEBUG ===")
     }
 }
 
