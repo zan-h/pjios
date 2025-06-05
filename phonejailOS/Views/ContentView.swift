@@ -66,15 +66,34 @@ struct ContentView: View {
                         print("Jailkeeper tab appeared")
                     }
                 
-                SettingsView()
-                    .environmentObject(settingsService)
-                    .tabItem {
-                        Label("Settings", systemImage: "gear")
+                // Settings tab with access control
+                Group {
+                    if accessControlService.isSchemaAccessLocked && !accessControlService.temporaryAccessGranted {
+                        LockedSettingsView(
+                            accessControlService: accessControlService,
+                            jailkeeperViewModel: jailkeeperViewModel,
+                            selectedTab: $selectedTab
+                        )
+                        .onAppear {
+                            print("🔒 ContentView: Showing LockedSettingsView")
+                        }
+                    } else {
+                        SettingsView()
+                            .environmentObject(settingsService)
+                            .onAppear {
+                                print("⚙️ ContentView: Showing SettingsView - isLocked: \(accessControlService.isSchemaAccessLocked), tempAccess: \(accessControlService.temporaryAccessGranted)")
+                            }
                     }
-                    .tag(2)
-                    .onAppear {
-                        print("Settings tab appeared")
-                    }
+                }
+                .tabItem {
+                    Label("Settings", systemImage: "gear")
+                }
+                .tag(2)
+                .onAppear {
+                    print("Settings tab appeared")
+                    // Ensure configuration happens when settings tab appears
+                    configureAccessControl()
+                }
             }
         }
         .onAppear {
@@ -128,6 +147,15 @@ struct ContentView: View {
                     .font(.caption2)
                     .foregroundColor(accessControlService.isSchemaAccessLocked ? .red : .green)
                 Spacer()
+            }
+            
+            if accessControlService.isSchemaAccessLocked {
+                HStack {
+                    Text("Protected: Schemas & Settings")
+                        .font(.caption2)
+                        .foregroundColor(.red)
+                    Spacer()
+                }
             }
             
             if accessControlService.temporaryAccessGranted {
