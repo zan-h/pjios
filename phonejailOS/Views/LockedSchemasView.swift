@@ -7,20 +7,20 @@ struct LockedSchemasView: View {
     
     var body: some View {
         NavigationView {
-            VStack(spacing: 32) {
+            VStack(spacing: 24) {
                 Spacer()
                 
                 // Lock icon
                 Image(systemName: "lock.fill")
-                    .font(.system(size: 80))
+                    .font(.system(size: 60))
                     .foregroundColor(.red)
                 
-                VStack(spacing: 16) {
+                VStack(spacing: 12) {
                     Text("Schemas Locked")
-                        .font(.title)
-                        .fontWeight(.bold)
+                        .font(.title2)
+                        .fontWeight(.semibold)
                     
-                    Text("Global Strict Mode is enabled and you have active schemas. To modify your schemas, you must speak directly with the jail keeper to convince them to grant you temporary access.")
+                    Text("Strict Mode is active. Speak to the jail keeper for access.")
                         .font(.body)
                         .multilineTextAlignment(.center)
                         .foregroundColor(.secondary)
@@ -38,29 +38,29 @@ struct LockedSchemasView: View {
                     .foregroundColor(.white)
                     .padding()
                     .background(Color.blue)
-                    .cornerRadius(12)
+                    .cornerRadius(10)
                 }
                 
                 Spacer()
                 
-                VStack(spacing: 8) {
+                VStack(spacing: 6) {
                     Text("💡 Tip")
-                        .font(.headline)
+                        .font(.subheadline)
                         .foregroundColor(.blue)
                     
-                    Text("Be honest and persuasive when talking to your jail keeper. They will evaluate your request based on their personality and may grant you temporary access if convinced.")
+                    Text("Be honest and persuasive.")
                         .font(.caption)
                         .multilineTextAlignment(.center)
                         .foregroundColor(.secondary)
                         .padding(.horizontal)
                 }
                 
-                VStack(spacing: 8) {
+                VStack(spacing: 6) {
                     Text("🔓 Alternative")
-                        .font(.headline)
+                        .font(.subheadline)
                         .foregroundColor(.orange)
                     
-                    Text("You can also deactivate all your schemas or disable Strict Mode in Settings when no schemas are active.")
+                    Text("Deactivate schemas or disable Strict Mode.")
                         .font(.caption)
                         .multilineTextAlignment(.center)
                         .foregroundColor(.secondary)
